@@ -296,4 +296,5 @@ app.get('/stats', async (req, res) => {
     } catch (err) { res.status(500).json({ erro: err.message }); }
 });
 
-app.listen(3000, () => console.log('Servidor RhymArea rodando na porta 3000 🎤🔥'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => console.log(`Servidor RhymArea rodando na porta ${PORT} 🎤🔥`));
