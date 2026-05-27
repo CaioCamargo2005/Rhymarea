@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const conectar = require('./db');
 const Batalha  = require('./models/Batalha');
