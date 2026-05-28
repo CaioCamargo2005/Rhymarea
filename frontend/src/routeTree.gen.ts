@@ -13,6 +13,8 @@ import { Route as McsRouteImport } from './routes/mcs'
 import { Route as HistoricoRouteImport } from './routes/historico'
 import { Route as BatalhasRouteImport } from './routes/batalhas'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as McsIndexRouteImport } from './routes/mcs.index'
+import { Route as BatalhasIndexRouteImport } from './routes/batalhas.index'
 import { Route as McsIdRouteImport } from './routes/mcs.$id'
 import { Route as BatalhasIdRouteImport } from './routes/batalhas.$id'
 
@@ -36,6 +38,16 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McsIndexRoute = McsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => McsRoute,
+} as any)
+const BatalhasIndexRoute = BatalhasIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => BatalhasRoute,
+} as any)
 const McsIdRoute = McsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -52,14 +64,16 @@ export interface FileRoutesByFullPath {
   '/batalhas': typeof BatalhasRouteWithChildren
   '/historico': typeof HistoricoRoute
   '/mcs': typeof McsRouteWithChildren
+  '/batalhas/': typeof BatalhasIndexRoute
+  '/mcs/': typeof McsIndexRoute
   '/batalhas/$id': typeof BatalhasIdRoute
   '/mcs/$id': typeof McsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/batalhas': typeof BatalhasRouteWithChildren
   '/historico': typeof HistoricoRoute
-  '/mcs': typeof McsRouteWithChildren
+  '/batalhas': typeof BatalhasIndexRoute
+  '/mcs': typeof McsIndexRoute
   '/batalhas/$id': typeof BatalhasIdRoute
   '/mcs/$id': typeof McsIdRoute
 }
@@ -69,6 +83,8 @@ export interface FileRoutesById {
   '/batalhas': typeof BatalhasRouteWithChildren
   '/historico': typeof HistoricoRoute
   '/mcs': typeof McsRouteWithChildren
+  '/batalhas/': typeof BatalhasIndexRoute
+  '/mcs/': typeof McsIndexRoute
   '/batalhas/$id': typeof BatalhasIdRoute
   '/mcs/$id': typeof McsIdRoute
 }
@@ -79,16 +95,20 @@ export interface FileRouteTypes {
     | '/batalhas'
     | '/historico'
     | '/mcs'
+    | '/batalhas/'
+    | '/mcs/'
     | '/batalhas/$id'
     | '/mcs/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/batalhas' | '/historico' | '/mcs' | '/batalhas/$id' | '/mcs/$id'
+  to: '/' | '/historico' | '/batalhas' | '/mcs' | '/batalhas/$id' | '/mcs/$id'
   id:
     | '__root__'
     | '/'
     | '/batalhas'
     | '/historico'
     | '/mcs'
+    | '/batalhas/'
+    | '/mcs/'
     | '/batalhas/$id'
     | '/mcs/$id'
   fileRoutesById: FileRoutesById
@@ -130,6 +150,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcs/': {
+      id: '/mcs/'
+      path: '/'
+      fullPath: '/mcs/'
+      preLoaderRoute: typeof McsIndexRouteImport
+      parentRoute: typeof McsRoute
+    }
+    '/batalhas/': {
+      id: '/batalhas/'
+      path: '/'
+      fullPath: '/batalhas/'
+      preLoaderRoute: typeof BatalhasIndexRouteImport
+      parentRoute: typeof BatalhasRoute
+    }
     '/mcs/$id': {
       id: '/mcs/$id'
       path: '/$id'
@@ -148,10 +182,12 @@ declare module '@tanstack/react-router' {
 }
 
 interface BatalhasRouteChildren {
+  BatalhasIndexRoute: typeof BatalhasIndexRoute
   BatalhasIdRoute: typeof BatalhasIdRoute
 }
 
 const BatalhasRouteChildren: BatalhasRouteChildren = {
+  BatalhasIndexRoute: BatalhasIndexRoute,
   BatalhasIdRoute: BatalhasIdRoute,
 }
 
@@ -160,10 +196,12 @@ const BatalhasRouteWithChildren = BatalhasRoute._addFileChildren(
 )
 
 interface McsRouteChildren {
+  McsIndexRoute: typeof McsIndexRoute
   McsIdRoute: typeof McsIdRoute
 }
 
 const McsRouteChildren: McsRouteChildren = {
+  McsIndexRoute: McsIndexRoute,
   McsIdRoute: McsIdRoute,
 }
 
@@ -178,13 +216,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
