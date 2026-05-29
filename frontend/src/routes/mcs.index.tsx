@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { z } from "zod";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -25,34 +25,42 @@ const schema = z.object({
   bio:           z.string().trim().max(400).optional().or(z.literal("")),
 });
 
+const EMPTY_FORM = {
+  nomeArtistico: "", nomeReal: "", bairro: "", cidade: "", estilo: "", bio: "",
+};
+
 function McsPage() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({
-    nomeArtistico: "", nomeReal: "", bairro: "", cidade: "", estilo: "", bio: "",
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const { data: mcs, isLoading } = useQuery<MC[]>({
     queryKey: ["mcs"],
     queryFn: () => api.get("/mcs"),
+    staleTime: 30000,
+    refetchOnWindowFocus: false,
   });
 
   const cadastrar = useMutation({
     mutationFn: (values: z.infer<typeof schema>) => api.post("/mcs", values),
     onSuccess: () => {
       toast.success("MC na área! Cadastro feito.");
-      setForm({ nomeArtistico: "", nomeReal: "", bairro: "", cidade: "", estilo: "", bio: "" });
+      setForm(EMPTY_FORM);
       qc.invalidateQueries({ queryKey: ["mcs"] });
       qc.invalidateQueries({ queryKey: ["home-stats"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  function submit(e: React.FormEvent) {
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     const parsed = schema.safeParse(form);
     if (!parsed.success) { toast.error(parsed.error.issues[0].message); return; }
     cadastrar.mutate(parsed.data);
-  }
+  }, [form, cadastrar]);
+
+  const handleChange = useCallback((field: keyof typeof EMPTY_FORM) => (v: string) => {
+    setForm(prev => ({ ...prev, [field]: v }));
+  }, []);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-16">
@@ -63,20 +71,20 @@ function McsPage() {
       </p>
 
       <div className="mt-12 grid gap-12 md:grid-cols-[1fr_1.2fr]">
-        <form onSubmit={submit} className="space-y-4 rounded-sm border border-border bg-card p-6">
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-sm border border-border bg-card p-6">
           <h2 className="font-display text-2xl tracking-widest">ENTRAR NA ÁREA</h2>
-          <Field label="Nome artístico *" value={form.nomeArtistico} onChange={(v) => setForm({ ...form, nomeArtistico: v })} placeholder="MC Exemplo" />
-          <Field label="Nome real" value={form.nomeReal} onChange={(v) => setForm({ ...form, nomeReal: v })} placeholder="Opcional" />
+          <Field label="Nome artístico *" value={form.nomeArtistico} onChange={handleChange("nomeArtistico")} placeholder="MC Exemplo" />
+          <Field label="Nome real" value={form.nomeReal} onChange={handleChange("nomeReal")} placeholder="Opcional" />
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Bairro" value={form.bairro} onChange={(v) => setForm({ ...form, bairro: v })} placeholder="Centro" />
-            <Field label="Cidade" value={form.cidade} onChange={(v) => setForm({ ...form, cidade: v })} placeholder="São Paulo" />
+            <Field label="Bairro" value={form.bairro} onChange={handleChange("bairro")} placeholder="Centro" />
+            <Field label="Cidade" value={form.cidade} onChange={handleChange("cidade")} placeholder="São Paulo" />
           </div>
-          <Field label="Estilo" value={form.estilo} onChange={(v) => setForm({ ...form, estilo: v })} placeholder="Punchline, knockout..." />
+          <Field label="Estilo" value={form.estilo} onChange={handleChange("estilo")} placeholder="Punchline, knockout..." />
           <div>
             <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">BIO</label>
             <textarea
               value={form.bio}
-              onChange={(e) => setForm({ ...form, bio: e.target.value })}
+              onChange={(e) => setForm(prev => ({ ...prev, bio: e.target.value }))}
               maxLength={400} rows={4}
               placeholder="Conta tua história em poucas linhas..."
               className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
@@ -137,16 +145,17 @@ function McsPage() {
   );
 }
 
-function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
-  return (
-    <div>
-      <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">{label}</label>
-      <input
-        type="text" value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
-      />
-    </div>
-  );
-}
+const Field = ({ label, value, onChange, placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string
+}) => (
+  <div>
+    <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">{label}</label>
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
+    />
+  </div>
+);

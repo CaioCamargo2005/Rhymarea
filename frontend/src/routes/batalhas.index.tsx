@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { z } from "zod";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -23,13 +23,17 @@ const schema = z.object({
   descricao: z.string().trim().max(500).optional().or(z.literal("")),
 });
 
+const EMPTY_FORM = { nome: "", local: "", data: "", descricao: "" };
+
 function BatalhasPage() {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ nome: "", local: "", data: "", descricao: "" });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const { data: batalhas } = useQuery<Batalha[]>({
     queryKey: ["batalhas"],
     queryFn: () => api.get("/batalhas"),
+    staleTime: 30000,
+    refetchOnWindowFocus: false,
   });
 
   const criar = useMutation({
@@ -42,19 +46,23 @@ function BatalhasPage() {
       }),
     onSuccess: () => {
       toast.success("Batalha criada!");
-      setForm({ nome: "", local: "", data: "", descricao: "" });
+      setForm(EMPTY_FORM);
       qc.invalidateQueries({ queryKey: ["batalhas"] });
       qc.invalidateQueries({ queryKey: ["home-stats"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
-  function submit(e: React.FormEvent) {
+  const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     const parsed = schema.safeParse(form);
     if (!parsed.success) { toast.error(parsed.error.issues[0].message); return; }
     criar.mutate(parsed.data);
-  }
+  }, [form, criar]);
+
+  const handleChange = useCallback((field: keyof typeof EMPTY_FORM) => (v: string) => {
+    setForm(prev => ({ ...prev, [field]: v }));
+  }, []);
 
   const badgeColor: Record<string, string> = {
     criada: "bg-violet-500/20 text-violet-300",
@@ -69,16 +77,17 @@ function BatalhasPage() {
       <p className="mt-3 max-w-xl text-muted-foreground">Crie uma batalha, adicione MCs e gerencie o chaveamento.</p>
 
       <div className="mt-12 grid gap-12 md:grid-cols-[1fr_1.2fr]">
-        <form onSubmit={submit} className="space-y-4 rounded-sm border border-border bg-card p-6">
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-sm border border-border bg-card p-6">
           <h2 className="font-display text-2xl tracking-widest">NOVA BATALHA</h2>
-          <Input label="Nome da batalha *" value={form.nome} onChange={(v) => setForm({ ...form, nome: v })} placeholder="Final da temporada" />
+          <Input label="Nome da batalha *" value={form.nome} onChange={handleChange("nome")} placeholder="Final da temporada" />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Local" value={form.local} onChange={(v) => setForm({ ...form, local: v })} placeholder="Praça XV" />
+            <Input label="Local" value={form.local} onChange={handleChange("local")} placeholder="Praça XV" />
             <div>
               <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">DATA</label>
               <input
-                type="datetime-local" value={form.data}
-                onChange={(e) => setForm({ ...form, data: e.target.value })}
+                type="datetime-local"
+                value={form.data}
+                onChange={(e) => setForm(prev => ({ ...prev, data: e.target.value }))}
                 className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
               />
             </div>
@@ -87,7 +96,7 @@ function BatalhasPage() {
             <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">DESCRIÇÃO</label>
             <textarea
               value={form.descricao}
-              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+              onChange={(e) => setForm(prev => ({ ...prev, descricao: e.target.value }))}
               maxLength={500} rows={3}
               className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
             />
@@ -149,16 +158,17 @@ function BatalhasPage() {
   );
 }
 
-function Input({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
-  return (
-    <div>
-      <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">{label}</label>
-      <input
-        type="text" value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
-      />
-    </div>
-  );
-}
+const Input = ({ label, value, onChange, placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string
+}) => (
+  <div>
+    <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">{label}</label>
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
+    />
+  </div>
+);
