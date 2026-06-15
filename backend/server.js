@@ -219,6 +219,31 @@ app.get('/batalhas/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ erro: err.message }); }
 });
 
+// Atualizar torneio (nome, descricao, local, data)
+app.put('/batalhas/:id', async (req, res) => {
+    try {
+        const { nome, descricao, local, data } = req.body;
+        const batalha = await Batalha.findByIdAndUpdate(
+            req.params.id,
+            { nome, descricao, local, data },
+            { new: true }
+        );
+        if (!batalha) return res.status(404).send('Batalha não encontrada');
+        res.json(batalha);
+    } catch (err) { res.status(500).json({ erro: err.message }); }
+});
+
+// Deletar torneio e seus confrontos
+app.delete('/batalhas/:id', async (req, res) => {
+    try {
+        const batalha = await Batalha.findById(req.params.id);
+        if (!batalha) return res.status(404).send('Batalha não encontrada');
+        await Confronto.deleteMany({ _id: { $in: batalha.confrontos } });
+        await batalha.deleteOne();
+        res.json({ ok: true });
+    } catch (err) { res.status(500).json({ erro: err.message }); }
+});
+
 // ─────────────────────────────────────────
 // CONFRONTOS
 // ─────────────────────────────────────────

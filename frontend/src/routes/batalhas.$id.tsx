@@ -1,9 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { CalendarDays, MapPin, Trophy, ChevronRight, Swords } from "lucide-react";
+import { CalendarDays, MapPin, Trophy, ChevronRight, Swords, Trash2, Pencil, X, Check } from "lucide-react";
+import { z } from "zod";
 
 export const Route = createFileRoute("/batalhas/$id")({
   component: BatalhaPage,
@@ -31,9 +32,91 @@ const FASE_LABELS: Record<string, string> = {
   fase_custom: "FASE",
 };
 
+const editSchema = z.object({
+  nome:      z.string().trim().min(1, "Nome é obrigatório").max(120),
+  local:     z.string().trim().max(120).optional().or(z.literal("")),
+  data:      z.string().optional().or(z.literal("")),
+  descricao: z.string().trim().max(500).optional().or(z.literal("")),
+});
+
+// ── Modal de edição da batalha ───────────────────────────────────────────────
+function EditBatalhaModal({
+  batalha, onClose, onSave, isPending,
+}: {
+  batalha: Batalha;
+  onClose: () => void;
+  onSave: (v: z.infer<typeof editSchema>) => void;
+  isPending: boolean;
+}) {
+  const toLocal = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  const [form, setForm] = useState({
+    nome: batalha.nome ?? "",
+    local: batalha.local ?? "",
+    data: toLocal(batalha.data),
+    descricao: batalha.descricao ?? "",
+  });
+
+  const handle = (e: React.FormEvent) => {
+    e.preventDefault();
+    const r = editSchema.safeParse(form);
+    if (!r.success) { toast.error(r.error.issues[0].message); return; }
+    onSave(r.data);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm px-4">
+      <div className="w-full max-w-md rounded-sm border border-border bg-card p-6 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-display text-xl tracking-widest">EDITAR BATALHA</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <form onSubmit={handle} className="space-y-4">
+          <Field label="Nome *" value={form.nome} onChange={v => setForm(p => ({ ...p, nome: v }))} placeholder="Final da temporada" />
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Local" value={form.local} onChange={v => setForm(p => ({ ...p, local: v }))} placeholder="Praça XV" />
+            <div>
+              <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">DATA</label>
+              <input type="datetime-local" value={form.data}
+                onChange={e => setForm(p => ({ ...p, data: e.target.value }))}
+                className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary" />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">DESCRIÇÃO</label>
+            <textarea value={form.descricao} onChange={e => setForm(p => ({ ...p, descricao: e.target.value }))}
+              maxLength={500} rows={3}
+              className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary" />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 rounded-sm border border-border py-2 font-display text-sm tracking-widest hover:border-foreground transition-colors">
+              CANCELAR
+            </button>
+            <button disabled={isPending}
+              className="flex flex-1 items-center justify-center gap-2 rounded-sm bg-primary py-2 font-display text-sm tracking-widest text-primary-foreground shadow-neon disabled:opacity-60">
+              <Check className="h-4 w-4" />
+              {isPending ? "SALVANDO..." : "SALVAR"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Componente principal ─────────────────────────────────────────────────────
 function BatalhaPage() {
   const { id } = Route.useParams();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [votados, setVotados] = useState<Record<string, string>>(() => {
     try {
       const saved = localStorage.getItem(`votados_${id}`);
@@ -41,6 +124,8 @@ function BatalhaPage() {
     } catch { return {}; }
   });
   const [mcSelecionado, setMcSelecionado] = useState("");
+  const [editando, setEditando] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { data: batalha, isLoading } = useQuery<Batalha>({
     queryKey: ["batalha", id],
@@ -107,6 +192,34 @@ function BatalhaPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const editarBatalha = useMutation({
+    mutationFn: (values: z.infer<typeof editSchema>) =>
+      api.put(`/batalhas/${id}`, {
+        nome: values.nome,
+        local: values.local || null,
+        data: values.data ? new Date(values.data).toISOString() : null,
+        descricao: values.descricao || null,
+      }),
+    onSuccess: () => {
+      toast.success("Batalha atualizada!");
+      setEditando(false);
+      qc.invalidateQueries({ queryKey: ["batalha", id] });
+      qc.invalidateQueries({ queryKey: ["batalhas"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deletarBatalha = useMutation({
+    mutationFn: () => api.delete(`/batalhas/${id}`),
+    onSuccess: () => {
+      toast.success("Batalha deletada.");
+      qc.invalidateQueries({ queryKey: ["batalhas"] });
+      qc.invalidateQueries({ queryKey: ["home-stats"] });
+      navigate({ to: "/batalhas" });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   if (isLoading) return (
     <div className="mx-auto max-w-5xl px-6 py-20 text-muted-foreground font-display tracking-widest">
       CARREGANDO...
@@ -157,7 +270,7 @@ function BatalhaPage() {
 
       {/* HEADER */}
       <div className="mt-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="flex-1 min-w-0">
           {batalha.data && (
             <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground mb-2">
               <span className="inline-flex items-center gap-1">
@@ -181,74 +294,93 @@ function BatalhaPage() {
             <p className="mt-3 max-w-2xl text-sm text-muted-foreground">{batalha.descricao}</p>
           )}
         </div>
-        <span className={`rounded-sm border px-3 py-1 text-xs font-display tracking-widest ${statusColor[batalha.status] ?? ""}`}>
-          {batalha.status.replace("_", " ").toUpperCase()}
-        </span>
+
+        {/* Badge de status + botões de ação */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span className={`rounded-sm border px-3 py-1 text-xs font-display tracking-widest ${statusColor[batalha.status] ?? ""}`}>
+            {batalha.status.replace("_", " ").toUpperCase()}
+          </span>
+          <button
+            onClick={() => setEditando(true)}
+            title="Editar batalha"
+            className="rounded-sm border border-border bg-card p-2 text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setConfirmDelete(true)}
+            title="Deletar batalha"
+            className="rounded-sm border border-border bg-card p-2 text-muted-foreground hover:border-destructive hover:text-destructive transition-colors"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* CAMPEÃO */}
       {batalha.campeao && (
-        <div className="mt-8 inline-flex items-center gap-3 rounded-sm border border-accent bg-accent/10 px-6 py-3 shadow-neon">
-          <Trophy className="h-6 w-6 text-accent" />
+        <div className="mt-8 flex items-center gap-4 rounded-sm border border-yellow-500/30 bg-yellow-500/10 p-5">
+          <Trophy className="h-8 w-8 text-yellow-400" />
           <div>
-            <p className="text-xs font-display tracking-widest text-accent/70">CAMPEÃO</p>
-            <p className="font-display text-2xl tracking-widest">{batalha.campeao.nomeArtistico}</p>
+            <p className="text-xs font-display tracking-widest text-yellow-400">CAMPEÃO</p>
+            <p className="font-display text-2xl">{batalha.campeao.nomeArtistico}</p>
           </div>
         </div>
       )}
 
-      {/* ADICIONAR MC (criada) */}
+      {/* INSCRIÇÕES (status: criada) */}
       {batalha.status === "criada" && (
-        <div className="mt-10 rounded-sm border border-border bg-card p-6">
-          <h2 className="mb-4 font-display text-xl tracking-widest">INSCREVER MCS</h2>
-          <div className="flex gap-3">
-            <select
-              value={mcSelecionado}
-              onChange={e => setMcSelecionado(e.target.value)}
-              className="flex-1 rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
-            >
-              <option value="">Selecione um MC...</option>
-              {mcsParaAdicionar.map(m => (
-                <option key={m._id} value={m._id}>{m.nomeArtistico}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => {
-                if (mcSelecionado) {
-                  adicionarParticipante.mutate(mcSelecionado);
-                  setMcSelecionado("");
-                }
-              }}
-              disabled={!mcSelecionado || adicionarParticipante.isPending}
-              className="rounded-sm bg-primary px-4 py-2 font-display text-sm tracking-widest text-primary-foreground disabled:opacity-50 transition-opacity"
-            >
-              + ADICIONAR
-            </button>
-          </div>
+        <div className="mt-10">
+          <h2 className="mb-4 font-display text-2xl tracking-widest">INSCRIÇÕES</h2>
 
-          {batalha.participantes.length > 0 && (
-            <div className="mt-4">
-              <p className="text-xs font-display tracking-widest text-muted-foreground mb-2">
-                INSCRITOS ({batalha.participantes.length})
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {batalha.participantes.map(p => (
-                  <span key={p._id} className="rounded-sm bg-secondary px-3 py-1 text-xs font-display tracking-widest">
-                    {p.nomeArtistico}
-                  </span>
+          {/* Adicionar MC */}
+          {mcsParaAdicionar.length > 0 && (
+            <div className="mb-6 flex gap-3">
+              <select
+                value={mcSelecionado}
+                onChange={e => setMcSelecionado(e.target.value)}
+                className="flex-1 rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
+              >
+                <option value="">Selecione um MC...</option>
+                {mcsParaAdicionar.map(m => (
+                  <option key={m._id} value={m._id}>{m.nomeArtistico}</option>
                 ))}
-              </div>
+              </select>
+              <button
+                onClick={() => { if (mcSelecionado) { adicionarParticipante.mutate(mcSelecionado); setMcSelecionado(""); } }}
+                disabled={!mcSelecionado || adicionarParticipante.isPending}
+                className="rounded-sm border border-primary px-5 py-2 font-display text-sm tracking-widest text-primary hover:bg-primary hover:text-primary-foreground disabled:opacity-40 transition-all"
+              >
+                + ADICIONAR
+              </button>
             </div>
           )}
 
+          {/* Lista de inscritos */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            {batalha.participantes.map(p => (
+              <div key={p._id} className="flex items-center gap-3 rounded-sm border border-border bg-card px-4 py-3">
+                <ChevronRight className="h-4 w-4 text-primary" />
+                <span className="font-display">{p.nomeArtistico}</span>
+                {p.bairro && <span className="ml-auto text-xs text-muted-foreground">{p.bairro}</span>}
+              </div>
+            ))}
+            {batalha.participantes.length === 0 && (
+              <p className="col-span-2 text-sm text-muted-foreground">Nenhum MC inscrito ainda.</p>
+            )}
+          </div>
+
+          {/* Gerar chaveamento */}
           {batalha.participantes.length >= 2 && (
-            <button
-              onClick={() => gerarChaveamento.mutate()}
-              disabled={gerarChaveamento.isPending}
-              className="mt-6 rounded-sm bg-primary px-6 py-3 font-display tracking-widest text-primary-foreground shadow-neon disabled:opacity-50 transition-opacity"
-            >
-              {gerarChaveamento.isPending ? "GERANDO..." : "⚡ GERAR CHAVEAMENTO"}
-            </button>
+            <div className="mt-6">
+              <button
+                onClick={() => gerarChaveamento.mutate()}
+                disabled={gerarChaveamento.isPending}
+                className="rounded-sm bg-primary px-8 py-3 font-display text-lg tracking-widest text-primary-foreground shadow-neon disabled:opacity-60 hover:translate-y-[-1px] transition-all"
+              >
+                {gerarChaveamento.isPending ? "GERANDO..." : "⚡ GERAR CHAVEAMENTO"}
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -310,99 +442,39 @@ function BatalhaPage() {
                             isFaseAtual ? "border-primary/40 shadow-sm" : "border-border"
                           }`}
                         >
-                          {/* MC1 */}
-                          <div className="relative">
-                            <div
-                              className={`relative flex items-center justify-between px-4 py-3 transition-colors
-                                ${c.vencedor?._id === c.mc1._id ? "bg-green-500/10" : ""}
-                                ${ativo && !jaVotei ? "cursor-pointer hover:bg-primary/10" : ""}
-                              `}
-                              onClick={() => {
-                                if (ativo && !jaVotei) votar.mutate({ confrontoId: c._id, mcId: c.mc1._id });
-                              }}
-                            >
-                              <div
-                                className="absolute inset-y-0 left-0 bg-primary/8 transition-all"
-                                style={{ width: `${p1}%` }}
-                              />
-                              <div className="relative flex items-center gap-2 min-w-0">
-                                {c.vencedor?._id === c.mc1._id && (
-                                  <Trophy className="h-3 w-3 text-green-400 shrink-0" />
-                                )}
-                                <span className="font-display text-sm truncate">{c.mc1.nomeArtistico}</span>
-                              </div>
-                              <div className="relative flex items-center gap-2 shrink-0">
-                                <span className="text-xs text-muted-foreground">{c.votos.mc1}</span>
-                                {jaVotei === c.mc1._id && (
-                                  <span className="text-xs text-primary">✓</span>
-                                )}
-                              </div>
-                            </div>
+                          {/* MC 1 */}
+                          <MCRow
+                            mc={c.mc1}
+                            votos={c.votos.mc1}
+                            pct={p1}
+                            isWinner={c.vencedor?._id === c.mc1._id}
+                            voted={jaVotei === c.mc1._id}
+                            canVote={ativo && !jaVotei}
+                            canForce={podeDefinirVencedor}
+                            onVote={() => votar.mutate({ confrontoId: c._id, mcId: c.mc1._id })}
+                            onForce={() => definirVencedor.mutate({ confrontoId: c._id, mcId: c.mc1._id })}
+                          />
 
-                            {/* Botão definir vencedor (organizador) */}
-                            {podeDefinirVencedor && !c.vencedor && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  definirVencedor.mutate({ confrontoId: c._id, mcId: c.mc1._id });
-                                }}
-                                className="absolute right-0 top-0 bottom-0 px-2 opacity-0 hover:opacity-100 bg-green-500/20 hover:bg-green-500/30 transition-all text-green-400 text-xs font-display"
-                                title="Definir como vencedor"
-                              >
-                                WIN
-                              </button>
-                            )}
+                          {/* Separador */}
+                          <div className="border-t border-border/30 px-4 py-1 text-center text-[10px] font-display tracking-widest text-muted-foreground/50">
+                            VS
                           </div>
 
-                          <div className="border-t border-border/50" />
-
-                          {/* MC2 */}
+                          {/* MC 2 */}
                           {c.mc2 ? (
-                            <div className="relative">
-                              <div
-                                className={`relative flex items-center justify-between px-4 py-3 transition-colors
-                                  ${c.vencedor?._id === c.mc2._id ? "bg-green-500/10" : ""}
-                                  ${ativo && !jaVotei ? "cursor-pointer hover:bg-primary/10" : ""}
-                                `}
-                                onClick={() => {
-                                  if (ativo && !jaVotei && c.mc2) votar.mutate({ confrontoId: c._id, mcId: c.mc2._id });
-                                }}
-                              >
-                                <div
-                                  className="absolute inset-y-0 left-0 bg-primary/8 transition-all"
-                                  style={{ width: `${p2}%` }}
-                                />
-                                <div className="relative flex items-center gap-2 min-w-0">
-                                  {c.vencedor?._id === c.mc2._id && (
-                                    <Trophy className="h-3 w-3 text-green-400 shrink-0" />
-                                  )}
-                                  <span className="font-display text-sm truncate">{c.mc2.nomeArtistico}</span>
-                                </div>
-                                <div className="relative flex items-center gap-2 shrink-0">
-                                  <span className="text-xs text-muted-foreground">{c.votos.mc2}</span>
-                                  {jaVotei === c.mc2._id && (
-                                    <span className="text-xs text-primary">✓</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {podeDefinirVencedor && !c.vencedor && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    definirVencedor.mutate({ confrontoId: c._id, mcId: c.mc2!._id });
-                                  }}
-                                  className="absolute right-0 top-0 bottom-0 px-2 opacity-0 hover:opacity-100 bg-green-500/20 hover:bg-green-500/30 transition-all text-green-400 text-xs font-display"
-                                  title="Definir como vencedor"
-                                >
-                                  WIN
-                                </button>
-                              )}
-                            </div>
+                            <MCRow
+                              mc={c.mc2}
+                              votos={c.votos.mc2}
+                              pct={p2}
+                              isWinner={c.vencedor?._id === c.mc2._id}
+                              voted={jaVotei === c.mc2._id}
+                              canVote={ativo && !jaVotei}
+                              canForce={podeDefinirVencedor}
+                              onVote={() => votar.mutate({ confrontoId: c._id, mcId: c.mc2!._id })}
+                              onForce={() => definirVencedor.mutate({ confrontoId: c._id, mcId: c.mc2!._id })}
+                            />
                           ) : (
-                            <div className="px-4 py-3 text-xs text-muted-foreground italic">
-                              — bye (W.O.)
-                            </div>
+                            <div className="px-4 py-3 text-xs text-muted-foreground italic">BYE — passa automático</div>
                           )}
 
                           {/* Info de votos total */}
@@ -431,6 +503,105 @@ function BatalhaPage() {
           )}
         </div>
       )}
+
+      {/* Modal de edição */}
+      {editando && (
+        <EditBatalhaModal
+          batalha={batalha}
+          onClose={() => setEditando(false)}
+          onSave={(values) => editarBatalha.mutate(values)}
+          isPending={editarBatalha.isPending}
+        />
+      )}
+
+      {/* Confirmação de delete */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm px-4">
+          <div className="w-full max-w-sm rounded-sm border border-destructive/50 bg-card p-6 shadow-xl">
+            <h2 className="font-display text-xl tracking-widest text-destructive">DELETAR BATALHA</h2>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Essa ação é permanente. Todos os confrontos e dados de <strong className="text-foreground">{batalha.nome}</strong> serão removidos.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex-1 rounded-sm border border-border py-2 font-display text-sm tracking-widest hover:border-foreground transition-colors"
+              >
+                CANCELAR
+              </button>
+              <button
+                onClick={() => deletarBatalha.mutate()}
+                disabled={deletarBatalha.isPending}
+                className="flex flex-1 items-center justify-center gap-2 rounded-sm bg-destructive py-2 font-display text-sm tracking-widest text-destructive-foreground disabled:opacity-60"
+              >
+                <Trash2 className="h-4 w-4" />
+                {deletarBatalha.isPending ? "DELETANDO..." : "CONFIRMAR"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sub-componente para linha de MC no bracket ───────────────────────────────
+function MCRow({
+  mc, votos, pct, isWinner, voted, canVote, canForce, onVote, onForce,
+}: {
+  mc: MC; votos: number; pct: number;
+  isWinner: boolean; voted: boolean;
+  canVote: boolean; canForce: boolean;
+  onVote: () => void; onForce: () => void;
+}) {
+  return (
+    <div
+      className={`group/mc relative px-4 py-3 transition-colors ${
+        isWinner ? "bg-green-500/10" :
+        voted ? "bg-primary/5" : ""
+      } ${canVote ? "cursor-pointer hover:bg-primary/10" : ""}`}
+      onClick={() => { if (canVote) onVote(); }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className={`font-display text-sm ${isWinner ? "text-green-400" : ""}`}>
+          {mc.nomeArtistico}
+          {isWinner && " 🏆"}
+          {voted && !isWinner && " ✓"}
+        </span>
+        <span className="text-xs text-muted-foreground">{pct}%</span>
+      </div>
+      {/* Barra de progresso */}
+      <div className="mt-1.5 h-0.5 w-full overflow-hidden rounded-full bg-border/40">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${isWinner ? "bg-green-400" : "bg-primary/60"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {/* Botão forçar vencedor (hover) */}
+      {canForce && (
+        <button
+          onClick={e => { e.stopPropagation(); onForce(); }}
+          className="absolute right-2 top-2 hidden rounded-sm border border-border bg-card px-2 py-0.5 text-[10px] font-display tracking-widest text-muted-foreground hover:border-primary hover:text-primary group-hover/mc:flex transition-colors"
+        >
+          DEFINIR
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Input auxiliar ───────────────────────────────────────────────────────────
+function Field({ label, value, onChange, placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-display tracking-widest text-muted-foreground">{label}</label>
+      <input
+        type="text" value={value} placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        className="w-full rounded-sm border border-border bg-input px-3 py-2 text-sm outline-none focus:border-primary"
+      />
     </div>
   );
 }
