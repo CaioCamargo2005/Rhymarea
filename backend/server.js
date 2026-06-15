@@ -1,21 +1,14 @@
 require('dotenv').config();
 const express = require('express');
+const cors    = require('cors');
 const conectar = require('./db');
 const Batalha  = require('./models/Batalha');
 const Confronto= require('./models/Confronto');
 const MC       = require('./models/MC');
 
 const app = express();
+app.use(cors());
 app.use(express.json());
-
-// Libera CORS para o frontend conseguir chamar a API
-app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
-    next();
-});
 
 conectar();
 
@@ -68,7 +61,6 @@ app.get('/mcs/:id', async (req, res) => {
         const mc = await MC.findById(req.params.id);
         if (!mc) return res.status(404).send('MC não encontrado');
 
-        // Busca confrontos que esse MC participou e já têm vencedor
         const confrontos = await Confronto.find({
             $or: [{ mc1: mc._id }, { mc2: mc._id }],
             vencedor: { $ne: null }
@@ -84,6 +76,15 @@ app.put('/mcs/:id', async (req, res) => {
         const mc = await MC.findByIdAndUpdate(req.params.id, req.body, { new: true });
         if (!mc) return res.status(404).send('MC não encontrado');
         res.json(mc);
+    } catch (err) { res.status(500).json({ erro: err.message }); }
+});
+
+// Deletar MC
+app.delete('/mcs/:id', async (req, res) => {
+    try {
+        const mc = await MC.findByIdAndDelete(req.params.id);
+        if (!mc) return res.status(404).send('MC não encontrado');
+        res.json({ ok: true });
     } catch (err) { res.status(500).json({ erro: err.message }); }
 });
 
@@ -130,7 +131,6 @@ app.post('/batalhas/:id/gerar', async (req, res) => {
         if (!batalha) return res.status(404).send('Batalha não encontrada');
         if (batalha.participantes.length < 2) return res.status(400).send('Mínimo 2 participantes');
 
-        // Remove confrontos antigos se re-gerar
         await Confronto.deleteMany({ _id: { $in: batalha.confrontos } });
         batalha.confrontos = [];
 
@@ -170,8 +170,6 @@ app.post('/batalhas/:id/proxima-fase', async (req, res) => {
         if (batalha.faseAtual === 'final' && vencedores.length === 1) {
             batalha.campeao = vencedores[0];
             batalha.status  = 'finalizada';
-
-            // Atualiza vitória do campeão
             await MC.findByIdAndUpdate(vencedores[0], { $inc: { vitorias: 1 } });
             await batalha.save();
             await batalha.populate('campeao');
@@ -290,9 +288,8 @@ app.put('/confrontos/:id/vencedor', async (req, res) => {
         const mc2id = confronto.mc2?._id?.toString();
         if (mcId !== mc1id && mcId !== mc2id) return res.status(400).send('MC não pertence a este confronto');
 
-        // Atualiza vitória/derrota nos perfis
         const perdedorId = mcId === mc1id ? mc2id : mc1id;
-        await MC.findByIdAndUpdate(mcId,      { $inc: { vitorias: 1 } });
+        await MC.findByIdAndUpdate(mcId, { $inc: { vitorias: 1 } });
         if (perdedorId) await MC.findByIdAndUpdate(perdedorId, { $inc: { derrotas: 1 } });
 
         confronto.vencedor = mcId;
